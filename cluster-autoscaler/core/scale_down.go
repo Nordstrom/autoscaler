@@ -24,6 +24,7 @@ import (
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 	"k8s.io/autoscaler/cluster-autoscaler/clusterstate"
+	"k8s.io/autoscaler/cluster-autoscaler/metrics"
 	"k8s.io/autoscaler/cluster-autoscaler/simulator"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/deletetaint"
 	kube_util "k8s.io/autoscaler/cluster-autoscaler/utils/kubernetes"
@@ -208,6 +209,7 @@ func (sd *ScaleDown) TryToScaleDown(nodes []*apiv1.Node, pods []*apiv1.Pod, pdbs
 
 			nodeGroup, err := sd.context.CloudProvider.NodeGroupForNode(node)
 			if err != nil {
+				metrics.UpdateScaleFailures("all", "NoGroupForNode")
 				glog.Errorf("Error while checking node group for %s: %v", node.Name, err)
 				continue
 			}
@@ -218,11 +220,14 @@ func (sd *ScaleDown) TryToScaleDown(nodes []*apiv1.Node, pods []*apiv1.Pod, pdbs
 
 			size, err := nodeGroup.TargetSize()
 			if err != nil {
+				metrics.UpdateScaleFailures(nodeGroup.Id(), "UnknownGroupSize")
 				glog.Errorf("Error while checking node group size %s: %v", nodeGroup.Id(), err)
 				continue
 			}
 
 			if size <= nodeGroup.MinSize() {
+				// TODO: maybe be annoying, would this be useful?
+				// metrics.UpdateScaleFailures(nodeGroup.Id(),"LowerBoundReached")
 				glog.V(1).Infof("Skipping %s - node group min size reached", node.Name)
 				continue
 			}
@@ -257,6 +262,7 @@ func (sd *ScaleDown) TryToScaleDown(nodes []*apiv1.Node, pods []*apiv1.Pod, pdbs
 			timeElapsed := time.Now().Sub(startTime)
 			timeLeft := MaxCloudProviderNodeDeletionTime - timeElapsed
 			if timeLeft < 0 {
+				metrics.UpdateScaleFailures("unkown", "DeleteNodeTimeout")
 				finalError = fmt.Errorf("Failed to delete nodes in time")
 				break
 			}
@@ -303,6 +309,8 @@ func (sd *ScaleDown) TryToScaleDown(nodes []*apiv1.Node, pods []*apiv1.Pod, pdbs
 	simulator.RemoveNodeFromTracker(sd.usageTracker, toRemove.Node.Name, sd.unneededNodes)
 	err = deleteNode(sd.context, toRemove.Node, toRemove.PodsToReschedule)
 	if err != nil {
+		nodeGroup, _ := sd.context.CloudProvider.NodeGroupForNode(toRemove.Node)
+		metrics.UpdateScaleFailures(nodeGroup.Id(), "NodeDeletionFailure")
 		return ScaleDownError, fmt.Errorf("Failed to delete %s: %v", toRemove.Node.Name, err)
 	}
 
@@ -478,12 +486,15 @@ func deleteNodeFromCloudProvider(node *apiv1.Node, cloudProvider cloudprovider.C
 	recorder kube_record.EventRecorder, registry *clusterstate.ClusterStateRegistry) error {
 	nodeGroup, err := cloudProvider.NodeGroupForNode(node)
 	if err != nil {
+		metrics.UpdateScaleFailures("all", "NoGroupForNode")
 		return fmt.Errorf("failed to node group for %s: %v", node.Name, err)
 	}
 	if nodeGroup == nil || reflect.ValueOf(nodeGroup).IsNil() {
+		metrics.UpdateScaleFailures("all", "NoGroupForNode")
 		return fmt.Errorf("picked node that doesn't belong to a node group: %s", node.Name)
 	}
 	if err = nodeGroup.DeleteNodes([]*apiv1.Node{node}); err != nil {
+		metrics.UpdateScaleFailures(nodeGroup.Id(), "NodeDeletionFailure")
 		return fmt.Errorf("failed to delete %s: %v", node.Name, err)
 	}
 	recorder.Eventf(node, apiv1.EventTypeNormal, "ScaleDown", "node removed by cluster autoscaler")
@@ -493,5 +504,7 @@ func deleteNodeFromCloudProvider(node *apiv1.Node, cloudProvider cloudprovider.C
 		Time:               time.Now(),
 		ExpectedDeleteTime: time.Now().Add(MaxCloudProviderNodeDeletionTime),
 	})
+	metrics.UpdateNodeRemoved(nodeGroup.Id())
+
 	return nil
 }

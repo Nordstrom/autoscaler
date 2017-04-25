@@ -204,6 +204,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) {
 	if len(unschedulablePodsToHelp) == 0 {
 		glog.V(1).Info("No unschedulable pods")
 	} else if a.MaxNodesTotal > 0 && len(readyNodes) >= a.MaxNodesTotal {
+		metrics.UpdateScaleFailures("all", "UpperBoundReached")
 		glog.V(1).Info("Max total nodes in cluster reached")
 	} else {
 		scaleUpStart := time.Now()

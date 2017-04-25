@@ -22,6 +22,7 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/aws"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/azure"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/gce"
+	"k8s.io/autoscaler/cluster-autoscaler/metrics"
 	"os"
 )
 
@@ -112,6 +113,12 @@ func (b CloudProviderBuilder) Build(nodeGroupsFlag []string) cloudprovider.Cloud
 		if err != nil {
 			glog.Fatalf("Failed to create Azure cloud provider: %v", err)
 		}
+	}
+
+	// Set stats for node groups
+	for _, nodeGroup := range cloudProvider.NodeGroups() {
+		metrics.UpdateNodeGroupMaxState(nodeGroup.Id(), nodeGroup.MaxSize())
+		metrics.UpdateNodeGroupMinState(nodeGroup.Id(), nodeGroup.MinSize())
 	}
 
 	return cloudProvider

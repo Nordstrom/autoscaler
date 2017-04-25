@@ -23,6 +23,7 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/clusterstate"
 	"k8s.io/autoscaler/cluster-autoscaler/estimator"
 	"k8s.io/autoscaler/cluster-autoscaler/expander"
+	"k8s.io/autoscaler/cluster-autoscaler/metrics"
 	apiv1 "k8s.io/kubernetes/pkg/api/v1"
 	"k8s.io/kubernetes/plugin/pkg/scheduler/schedulercache"
 
@@ -53,6 +54,7 @@ func ScaleUp(context *AutoscalingContext, unschedulablePods []*apiv1.Pod, nodes 
 	for nodeGroup, numberOfNodes := range context.ClusterStateRegistry.GetUpcomingNodes() {
 		nodeTemplate, found := nodeInfos[nodeGroup]
 		if !found {
+			metrics.UpdateScaleFailures(nodeGroup, "FailedToFindTemplateForNode")
 			return false, fmt.Errorf("failed to find template node for node group %s", nodeGroup)
 		}
 		for i := 0; i < numberOfNodes; i++ {
@@ -73,6 +75,7 @@ func ScaleUp(context *AutoscalingContext, unschedulablePods []*apiv1.Pod, nodes 
 
 		currentSize, err := nodeGroup.TargetSize()
 		if err != nil {
+			metrics.UpdateScaleFailures(nodeGroup.Id(), "UnkownGroupSize")
 			glog.Errorf("Failed to get node group size: %v", err)
 			continue
 		}
@@ -150,6 +153,7 @@ func ScaleUp(context *AutoscalingContext, unschedulablePods []*apiv1.Pod, nodes 
 
 		currentSize, err := bestOption.NodeGroup.TargetSize()
 		if err != nil {
+			metrics.UpdateScaleFailures(bestOption.NodeGroup.Id(), "UnkownGroupSize")
 			return false, fmt.Errorf("failed to get node group size: %v", err)
 		}
 		newSize := currentSize + bestOption.NodeCount
@@ -162,6 +166,7 @@ func ScaleUp(context *AutoscalingContext, unschedulablePods []*apiv1.Pod, nodes 
 			glog.V(1).Infof("Capping size to max cluster total size (%d)", context.MaxNodesTotal)
 			newSize = context.MaxNodesTotal - len(nodes) + currentSize
 			if newSize < currentSize {
+				metrics.UpdateScaleFailures("all", "UpperBoundReached")
 				return false, fmt.Errorf("max node total count already reached")
 			}
 		}
@@ -169,8 +174,10 @@ func ScaleUp(context *AutoscalingContext, unschedulablePods []*apiv1.Pod, nodes 
 		glog.V(0).Infof("Scale-up: setting group %s size to %d", bestOption.NodeGroup.Id(), newSize)
 		increase := newSize - currentSize
 		if err := bestOption.NodeGroup.IncreaseSize(increase); err != nil {
+			metrics.UpdateScaleFailures(bestOption.NodeGroup.Id(), "FailedToFindTemplateForNode")
 			return false, fmt.Errorf("failed to increase node group size: %v", err)
 		}
+		metrics.UpdateNodeGroupState(bestOption.NodeGroup.Id(), newSize)
 		context.ClusterStateRegistry.RegisterScaleUp(
 			&clusterstate.ScaleUpRequest{
 				NodeGroupName:   bestOption.NodeGroup.Id(),

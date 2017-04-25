@@ -46,6 +46,47 @@ var (
 			Help:      "Time spent in main loop fragments in microseconds.",
 		}, []string{"main"},
 	)
+
+	nodegroupminstate = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "cluster_autoscaler",
+			Name:      "node_group_min_spec",
+			Help:      "Current minimum bound of the node group.",
+		}, []string{
+			"node_group",
+		},
+	)
+
+	nodegroupmaxstate = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "cluster_autoscaler",
+			Name:      "node_group_max_spec",
+			Help:      "Current maximum bound of the node group.",
+		}, []string{
+			"node_group",
+		},
+	)
+
+	nodegroupstate = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "cluster_autoscaler",
+			Name:      "node_group_size",
+			Help:      "Current size of the node group.",
+		}, []string{
+			"node_group",
+		},
+	)
+
+	scalefailures = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "cluster_autoscaler",
+			Name:      "node_group_scaling_failures",
+			Help:      "Current size of the node group.",
+		}, []string{
+			"node_group",
+			"type",
+		},
+	)
 )
 
 func init() {
@@ -67,4 +108,34 @@ func UpdateDuration(label string, start time.Time) {
 // UpdateLastTime records the time the step identified by the label was started
 func UpdateLastTime(label string) {
 	lastTimestamp.WithLabelValues(label).Set(float64(time.Now().Unix()))
+}
+
+// UpdateNodeGroupMinState records the current minimum size of a given node group
+func UpdateNodeGroupMinState(nodegroup string, min int) {
+	nodegroupminstate.WithLabelValues(nodegroup).Set(float64(min))
+}
+
+// UpdateNodeGroupMaxState records the current maximum size of a given node group
+func UpdateNodeGroupMaxState(nodegroup string, max int) {
+	nodegroupmaxstate.WithLabelValues(nodegroup).Set(float64(max))
+}
+
+// UpdateNodeGroupState records the current size of a given node group
+func UpdateNodeGroupState(nodegroup string, current int) {
+	nodegroupstate.WithLabelValues(nodegroup).Set(float64(current))
+}
+
+// UpdateNodeRemoved decriments the nodegroup size
+func UpdateNodeRemoved(nodegroup string) {
+	nodegroupstate.WithLabelValues(nodegroup).Dec()
+}
+
+// UpdateNodeAdded incriments the nodegroup size
+func UpdateNodeAdded(nodegroup string) {
+	nodegroupstate.WithLabelValues(nodegroup).Inc()
+}
+
+// UpdateScaleFailures inc the counter of failures of a nodegroup and type
+func UpdateScaleFailures(nodegroup string, failuretype string) {
+	scalefailures.WithLabelValues(nodegroup, failuretype).Inc()
 }
